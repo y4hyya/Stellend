@@ -35,6 +35,9 @@ yarn-error.log*
 coverage/
 .nyc_output/
 
+# Soroban test snapshots (auto-generated, regenerated on test runs)
+**/test_snapshots/
+
 # Temporary files
 tmp/
 temp/

@@ -124,8 +124,15 @@ pub struct LendingPool;
 // EXTERNAL CONTRACT INTERFACES
 // ============================================================================
 
-// Note: For MVP/hackathon, we use fallback implementations.
-// In production, use contractimport! for cross-contract calls.
+// Oracle contract client for cross-contract calls
+mod oracle_contract {
+    soroban_sdk::contractimport!(
+        file = "../target/wasm32-unknown-unknown/release/stellend_price_oracle.wasm"
+    );
+}
+
+// Flag to enable/disable oracle calls (for testing without deployed oracle)
+const USE_ORACLE: bool = false; // Set to true when oracle is deployed
 
 #[contractimpl]
 impl LendingPool {
@@ -818,12 +825,39 @@ impl LendingPool {
     }
 
     /// Get asset price from oracle
-    /// 
-    /// TODO: In production, call the actual oracle contract using:
-    /// `oracle::get_price(env, oracle, asset)`
-    fn get_asset_price(_env: &Env, _oracle: &Address, asset: &Symbol) -> i128 {
-        // For now, use hardcoded prices as fallback
-        // In production, this would call the oracle contract
+    ///
+    /// Calls the Price Oracle contract to get current USD price for an asset.
+    /// Falls back to hardcoded prices if oracle is not available.
+    ///
+    /// # Arguments
+    /// * `env` - Soroban environment
+    /// * `oracle` - Oracle contract address
+    /// * `asset` - Asset symbol (XLM or USDC)
+    ///
+    /// # Returns
+    /// Price in USD (scaled by 1e7)
+    fn get_asset_price(env: &Env, oracle: &Address, asset: &Symbol) -> i128 {
+        if USE_ORACLE {
+            // Cross-contract call to Oracle
+            let oracle_client = oracle_contract::Client::new(env, oracle);
+            let price = oracle_client.get_price(asset);
+            
+            // Fallback if price not set
+            if price == 0 {
+                Self::get_fallback_price(asset)
+            } else {
+                price
+            }
+        } else {
+            // Use fallback prices (for testing without deployed oracle)
+            Self::get_fallback_price(asset)
+        }
+    }
+
+    /// Get fallback price for testing
+    ///
+    /// Used when oracle is not deployed or price not available.
+    fn get_fallback_price(asset: &Symbol) -> i128 {
         if *asset == XLM {
             3_000_000 // $0.30
         } else if *asset == USDC {
