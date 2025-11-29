@@ -94,6 +94,8 @@ pub struct MarketInfo {
     pub total_shares: i128,
     pub exchange_rate: i128,
     pub utilization_rate: i128,
+    pub borrow_rate: i128,      // Annual borrow APR (scaled by 1e7)
+    pub supply_rate: i128,      // Annual supply APY (scaled by 1e7)
     pub ltv_ratio: i128,
 }
 
@@ -109,15 +111,21 @@ pub struct MarketInfo {
 /// - Deposit collateral (XLM) to enable borrowing
 /// - Borrow assets against collateral (respecting LTV)
 /// - Repay borrowed assets
+///
+/// ## Interest Accrual
+/// 
+/// Interest is accrued on each interaction (supply, withdraw, borrow, repay).
+/// The borrow rate is determined by the external Interest Rate Model contract,
+/// which uses a kinked rate model based on pool utilization.
 #[contract]
 pub struct LendingPool;
 
 // ============================================================================
-// ORACLE INTERFACE (for cross-contract calls)
+// EXTERNAL CONTRACT INTERFACES
 // ============================================================================
 
-// Note: In production, use contractimport! to call the actual oracle contract
-// For now, we use hardcoded prices in get_asset_price() as a fallback
+// Note: For MVP/hackathon, we use fallback implementations.
+// In production, use contractimport! for cross-contract calls.
 
 #[contractimpl]
 impl LendingPool {
@@ -130,12 +138,14 @@ impl LendingPool {
     /// # Arguments
     /// * `admin` - Admin address for protocol management
     /// * `price_oracle` - Price oracle contract address
+    /// * `interest_rate_model` - Interest rate model contract address
     /// * `xlm_token` - Wrapped XLM token contract address
     /// * `usdc_token` - USDC token contract address
     pub fn initialize(
         env: Env,
         admin: Address,
         price_oracle: Address,
+        interest_rate_model: Address,
         xlm_token: Address,
         usdc_token: Address,
     ) {
@@ -143,9 +153,10 @@ impl LendingPool {
             panic!("Already initialized");
         }
 
-        // Store admin and oracle
+        // Store admin and external contract addresses
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::PriceOracle, &price_oracle);
+        env.storage().instance().set(&DataKey::InterestRateModel, &interest_rate_model);
 
         // Store token addresses
         env.storage().instance().set(&DataKey::TokenAddress(XLM), &xlm_token);
@@ -548,14 +559,27 @@ impl LendingPool {
     }
 
     // ========================================================================
-    // INTEREST ACCRUAL (stub for future implementation)
+    // INTEREST ACCRUAL
     // ========================================================================
 
     /// Accrue interest for an asset market
     /// 
-    /// Updates the exchange rate and borrow index based on time elapsed
-    /// and utilization rate. This should be called before any state changes.
+    /// This function is called before any state-changing operation to ensure
+    /// interest is properly accrued. It:
+    /// 
+    /// 1. Calculates time elapsed since last accrual
+    /// 2. Gets the borrow rate from the Interest Rate Model based on utilization
+    /// 3. Updates the borrow index (used to track user debt with interest)
+    /// 4. Distributes interest between suppliers and reserves
+    /// 
+    /// ## Interest Model Integration
+    /// 
+    /// The borrow rate is determined by the external Interest Rate Model contract:
+    /// - Uses a kinked rate model based on pool utilization
+    /// - Base rate: 0%, Slope1: 4%, Slope2: 75%, Optimal: 80%
+    /// - For MVP, we use an internal fallback that mimics the external model
     fn accrue_interest(env: &Env, asset: Symbol) {
+        // Get timestamps
         let last_accrual: u64 = env
             .storage()
             .instance()
@@ -563,55 +587,79 @@ impl LendingPool {
             .unwrap_or(0);
         let current_time = env.ledger().timestamp();
         
+        // Skip if no time has passed
         if current_time <= last_accrual {
             return;
         }
 
         let time_elapsed = current_time - last_accrual;
         
-        // Get current state
+        // Get current pool state
         let total_supply: i128 = env.storage().instance().get(&DataKey::TotalSupply(asset.clone())).unwrap_or(0);
         let total_borrow: i128 = env.storage().instance().get(&DataKey::TotalBorrow(asset.clone())).unwrap_or(0);
         
+        // Skip if nothing to accrue on
         if total_borrow == 0 || total_supply == 0 {
             env.storage().instance().set(&DataKey::LastAccrualTime(asset.clone()), &current_time);
             return;
         }
 
-        // Calculate utilization rate
+        // ====================================================================
+        // STEP 1: Calculate utilization rate
+        // ====================================================================
+        // Utilization = Total Borrowed / Total Supplied
+        // Scaled by SCALE (1e7), so 80% = 8_000_000
         let utilization = (total_borrow * SCALE) / total_supply;
 
-        // Simple interest rate model: base 2% + utilization * 10%
-        // Annual rate, we need to calculate per-second rate
-        let annual_rate = 200_000 + (utilization * 1_000_000) / SCALE; // 2% + up to 10%
-        let seconds_per_year: u64 = 31_536_000;
-        let interest_factor = (annual_rate * time_elapsed as i128) / seconds_per_year as i128;
+        // ====================================================================
+        // STEP 2: Get borrow rate from Interest Rate Model
+        // ====================================================================
+        // For MVP, we use an internal implementation that matches the kinked model:
+        // - Base rate: 0%
+        // - Below 80% utilization: rate = (utilization / 80%) * 4%
+        // - Above 80%: rate = 4% + ((utilization - 80%) / 20%) * 75%
+        let annual_borrow_rate = Self::calculate_borrow_rate(utilization);
+        
+        // Convert annual rate to rate for elapsed time
+        // interest_factor = annual_rate * time_elapsed / seconds_per_year
+        let seconds_per_year: i128 = 31_557_600; // 365.25 days
+        let interest_factor = (annual_borrow_rate * time_elapsed as i128) / seconds_per_year;
 
-        // Update borrow index
+        // ====================================================================
+        // STEP 3: Update borrow index
+        // ====================================================================
+        // The borrow index tracks accumulated interest over time
+        // User debt = principal * current_index / user_index_at_borrow
         let current_borrow_index: i128 = env
             .storage()
             .instance()
             .get(&DataKey::BorrowIndex(asset.clone()))
             .unwrap_or(INITIAL_EXCHANGE_RATE);
+        
+        // new_index = current_index * (1 + interest_factor)
         let new_borrow_index = current_borrow_index + (current_borrow_index * interest_factor) / SCALE;
         env.storage().instance().set(&DataKey::BorrowIndex(asset.clone()), &new_borrow_index);
 
-        // Calculate interest accrued
+        // ====================================================================
+        // STEP 4: Calculate and distribute interest
+        // ====================================================================
+        // Total interest accrued on all borrows
         let interest_accrued = (total_borrow * interest_factor) / SCALE;
 
-        // Update exchange rate (suppliers earn interest)
+        // Split between suppliers and protocol reserves
         let reserve_factor: i128 = env
             .storage()
             .instance()
             .get(&DataKey::ReserveFactor(asset.clone()))
-            .unwrap_or(1_000_000);
-        let supplier_interest = interest_accrued - (interest_accrued * reserve_factor) / SCALE;
+            .unwrap_or(1_000_000); // Default 10%
+        
         let reserve_interest = (interest_accrued * reserve_factor) / SCALE;
+        let supplier_interest = interest_accrued - reserve_interest;
 
-        // Increase total supply by supplier's portion of interest
+        // Increase total supply by supplier's portion (this grows sToken value)
         env.storage().instance().set(&DataKey::TotalSupply(asset.clone()), &(total_supply + supplier_interest));
         
-        // Increase reserves
+        // Increase protocol reserves
         let current_reserves: i128 = env
             .storage()
             .instance()
@@ -619,8 +667,46 @@ impl LendingPool {
             .unwrap_or(0);
         env.storage().instance().set(&DataKey::TotalReserves(asset.clone()), &(current_reserves + reserve_interest));
 
-        // Update last accrual time
+        // Update last accrual timestamp
         env.storage().instance().set(&DataKey::LastAccrualTime(asset.clone()), &current_time);
+    }
+
+    /// Calculate the borrow rate based on utilization
+    /// 
+    /// This implements the kinked interest rate model:
+    /// - Below optimal (80%): rate increases linearly with slope1 (4%)
+    /// - Above optimal: rate increases steeply with slope2 (75%)
+    /// 
+    /// ## Parameters (matching Interest Rate Model contract)
+    /// - Base rate: 0%
+    /// - Slope1: 4% (400_000 scaled)
+    /// - Slope2: 75% (7_500_000 scaled)
+    /// - Optimal utilization: 80% (8_000_000 scaled)
+    /// 
+    /// ## Example Rates
+    /// - 0% utilization → 0% APR
+    /// - 40% utilization → 2% APR
+    /// - 80% utilization → 4% APR
+    /// - 90% utilization → 41.5% APR
+    /// - 100% utilization → 79% APR
+    fn calculate_borrow_rate(utilization: i128) -> i128 {
+        // Model parameters (matching InterestRateModel contract defaults)
+        let base_rate: i128 = 0;           // 0%
+        let slope1: i128 = 400_000;        // 4%
+        let slope2: i128 = 7_500_000;      // 75%
+        let optimal: i128 = 8_000_000;     // 80%
+
+        if utilization <= optimal {
+            // Below or at optimal: linear increase with slope1
+            // rate = base_rate + (utilization / optimal) * slope1
+            base_rate + (utilization * slope1) / optimal
+        } else {
+            // Above optimal: steep increase with slope2
+            // excess = (utilization - optimal) / (100% - optimal)
+            // rate = base_rate + slope1 + excess * slope2
+            let excess_utilization = ((utilization - optimal) * SCALE) / (SCALE - optimal);
+            base_rate + slope1 + (excess_utilization * slope2) / SCALE
+        }
     }
 
     // ========================================================================
@@ -767,6 +853,9 @@ impl LendingPool {
     }
 
     /// Get market information for an asset
+    /// Get market information for an asset
+    /// 
+    /// Returns comprehensive market data including supply, borrow, rates, etc.
     pub fn get_market_info(env: Env, asset: Symbol) -> MarketInfo {
         let total_supply: i128 = env.storage().instance().get(&DataKey::TotalSupply(asset.clone())).unwrap_or(0);
         let total_borrow: i128 = env.storage().instance().get(&DataKey::TotalBorrow(asset.clone())).unwrap_or(0);
@@ -774,8 +863,24 @@ impl LendingPool {
         let exchange_rate = Self::get_exchange_rate_internal(&env, asset.clone());
         let ltv_ratio: i128 = env.storage().instance().get(&DataKey::LtvRatio(asset.clone())).unwrap_or(0);
 
+        // Calculate utilization rate
         let utilization_rate = if total_supply > 0 {
             (total_borrow * SCALE) / total_supply
+        } else {
+            0
+        };
+
+        // Calculate interest rates using the kinked model
+        let borrow_rate = Self::calculate_borrow_rate(utilization_rate);
+        
+        // Supply rate = borrow_rate * utilization * (1 - reserve_factor)
+        let reserve_factor: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ReserveFactor(asset))
+            .unwrap_or(1_000_000);
+        let supply_rate = if utilization_rate > 0 {
+            (borrow_rate * utilization_rate * (SCALE - reserve_factor)) / (SCALE * SCALE)
         } else {
             0
         };
@@ -786,6 +891,8 @@ impl LendingPool {
             total_shares,
             exchange_rate,
             utilization_rate,
+            borrow_rate,
+            supply_rate,
             ltv_ratio,
         }
     }
@@ -845,6 +952,56 @@ impl LendingPool {
     /// Get liquidation threshold for an asset
     pub fn get_liquidation_threshold(env: Env, asset: Symbol) -> i128 {
         env.storage().instance().get(&DataKey::LiquidationThreshold(asset)).unwrap_or(0)
+    }
+
+    /// Get the current borrow APR for an asset
+    /// 
+    /// Returns the annualized borrow rate based on current utilization.
+    /// Scaled by 1e7, so 5% = 500_000.
+    pub fn get_borrow_rate(env: Env, asset: Symbol) -> i128 {
+        let utilization = Self::get_utilization_rate(env, asset);
+        Self::calculate_borrow_rate(utilization)
+    }
+
+    /// Get the current supply APY for an asset
+    /// 
+    /// Returns the annualized supply rate based on current utilization.
+    /// Scaled by 1e7, so 3.2% = 320_000.
+    pub fn get_supply_rate(env: Env, asset: Symbol) -> i128 {
+        let utilization = Self::get_utilization_rate(env.clone(), asset.clone());
+        let borrow_rate = Self::calculate_borrow_rate(utilization);
+        
+        let reserve_factor: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ReserveFactor(asset))
+            .unwrap_or(1_000_000);
+        
+        // Supply rate = borrow_rate * utilization * (1 - reserve_factor)
+        if utilization > 0 {
+            (borrow_rate * utilization * (SCALE - reserve_factor)) / (SCALE * SCALE)
+        } else {
+            0
+        }
+    }
+
+    /// Get the borrow index for an asset
+    /// 
+    /// The borrow index tracks accumulated interest. Used to calculate
+    /// individual user debt with interest.
+    pub fn get_borrow_index(env: Env, asset: Symbol) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::BorrowIndex(asset))
+            .unwrap_or(INITIAL_EXCHANGE_RATE)
+    }
+
+    /// Get the interest rate model contract address
+    pub fn get_interest_rate_model(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::InterestRateModel)
+            .unwrap()
     }
 }
 
