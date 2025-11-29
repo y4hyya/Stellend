@@ -16,6 +16,12 @@ const SCALE: i128 = 10_000_000;
 /// Scaled by 1e9 for precision
 const INITIAL_EXCHANGE_RATE: i128 = 1_000_000_000;
 
+/// Liquidation parameters
+/// Close factor: Maximum portion of debt that can be liquidated (50%)
+const CLOSE_FACTOR: i128 = 5_000_000; // 50% (scaled by SCALE)
+/// Liquidation bonus: Extra collateral given to liquidator (5%)
+const LIQUIDATION_BONUS: i128 = 500_000; // 5% (scaled by SCALE)
+
 /// Asset symbols
 const XLM: Symbol = symbol_short!("XLM");
 const USDC: Symbol = symbol_short!("USDC");
@@ -1094,6 +1100,181 @@ impl LendingPool {
             .instance()
             .get(&DataKey::InterestRateModel)
             .unwrap()
+    }
+
+    /// Get health factor for a specific user
+    /// 
+    /// Health Factor = (collateral_value * liquidation_threshold) / debt_value
+    /// 
+    /// # Returns
+    /// - HF >= 1.0 (SCALE): Safe position
+    /// - HF < 1.0 (SCALE): Unsafe position, eligible for liquidation
+    /// - 999 * SCALE: No debt (infinite health factor)
+    /// 
+    /// Scaled by SCALE (1e7), so HF = 1.0 is represented as 10_000_000
+    pub fn get_health_factor(env: Env, user: Address) -> i128 {
+        let position = Self::get_user_position(env, user);
+        position.health_factor
+    }
+
+    // ========================================================================
+    // LIQUIDATION
+    // ========================================================================
+
+    /// Liquidate an undercollateralized position
+    /// 
+    /// Allows a liquidator to repay a portion of a borrower's debt in exchange
+    /// for a portion of their collateral plus a liquidation bonus.
+    /// 
+    /// # Requirements
+    /// - Borrower's health factor must be < 1.0
+    /// - Liquidator can repay up to 50% of borrower's debt (close factor)
+    /// - Liquidator receives equivalent collateral value + 5% bonus
+    /// 
+    /// # Arguments
+    /// * `liquidator` - Address calling the liquidation (repaying debt)
+    /// * `borrower` - Address being liquidated (underwater position)
+    /// * `repay_asset` - Asset to repay (e.g., USDC)
+    /// * `repay_amount` - Amount of debt to repay
+    /// * `collateral_asset` - Collateral asset to seize (e.g., XLM)
+    /// 
+    /// # Returns
+    /// Amount of collateral seized
+    pub fn liquidate(
+        env: Env,
+        liquidator: Address,
+        borrower: Address,
+        repay_asset: Symbol,
+        repay_amount: i128,
+        collateral_asset: Symbol,
+    ) -> i128 {
+        liquidator.require_auth();
+        
+        if repay_amount <= 0 {
+            panic!("Repay amount must be positive");
+        }
+
+        // ====================================================================
+        // STEP 1: Check borrower's health factor
+        // ====================================================================
+        
+        // Accrue interest first to get accurate debt
+        Self::accrue_interest(&env, repay_asset.clone());
+        
+        let borrower_position = Self::get_user_position(env.clone(), borrower.clone());
+        
+        // Health factor must be < 1.0 to be liquidatable
+        if borrower_position.health_factor >= SCALE {
+            panic!("Position is healthy, cannot liquidate");
+        }
+
+        // ====================================================================
+        // STEP 2: Calculate maximum repayable amount (close factor)
+        // ====================================================================
+        
+        let borrower_debt = Self::get_user_debt_with_interest(&env, borrower.clone(), repay_asset.clone());
+        
+        if borrower_debt == 0 {
+            panic!("Borrower has no debt in this asset");
+        }
+        
+        // Maximum repayable = 50% of borrower's debt
+        let max_repay = (borrower_debt * CLOSE_FACTOR) / SCALE;
+        
+        // Cap repay_amount to max allowed
+        let actual_repay = if repay_amount > max_repay {
+            max_repay
+        } else {
+            repay_amount
+        };
+
+        // ====================================================================
+        // STEP 3: Calculate collateral to seize
+        // ====================================================================
+        
+        let oracle: Address = env.storage().instance().get(&DataKey::PriceOracle).unwrap();
+        
+        // Get prices
+        let repay_price = Self::get_asset_price(&env, &oracle, &repay_asset);
+        let collateral_price = Self::get_asset_price(&env, &oracle, &collateral_asset);
+        
+        // Calculate repay value in USD
+        let repay_value_usd = (actual_repay * repay_price) / SCALE;
+        
+        // Add liquidation bonus (5%)
+        let bonus_value_usd = (repay_value_usd * LIQUIDATION_BONUS) / SCALE;
+        let total_value_usd = repay_value_usd + bonus_value_usd;
+        
+        // Convert to collateral amount
+        let collateral_to_seize = (total_value_usd * SCALE) / collateral_price;
+        
+        // Check borrower has sufficient collateral
+        let borrower_collateral: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::UserCollateral(borrower.clone(), collateral_asset.clone()))
+            .unwrap_or(0);
+        
+        if borrower_collateral < collateral_to_seize {
+            panic!("Insufficient collateral to seize");
+        }
+
+        // ====================================================================
+        // STEP 4: Execute liquidation
+        // ====================================================================
+        
+        // Transfer repay_asset from liquidator to pool
+        let repay_token: Address = env.storage().instance().get(&DataKey::TokenAddress(repay_asset.clone())).unwrap();
+        let repay_token_client = token::Client::new(&env, &repay_token);
+        repay_token_client.transfer(&liquidator, &env.current_contract_address(), &actual_repay);
+        
+        // Reduce borrower's debt
+        let borrower_debt_principal: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::UserDebt(borrower.clone(), repay_asset.clone()))
+            .unwrap_or(0);
+        let new_debt = if actual_repay >= borrower_debt {
+            0
+        } else {
+            // Calculate new principal based on repayment
+            let debt_reduction_ratio = (actual_repay * INITIAL_EXCHANGE_RATE) / borrower_debt;
+            borrower_debt_principal - (borrower_debt_principal * debt_reduction_ratio) / INITIAL_EXCHANGE_RATE
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::UserDebt(borrower.clone(), repay_asset.clone()), &new_debt);
+        
+        // Reduce total borrows
+        let total_borrow: i128 = env.storage().instance().get(&DataKey::TotalBorrow(repay_asset.clone())).unwrap_or(0);
+        let new_total_borrow = if total_borrow > actual_repay {
+            total_borrow - actual_repay
+        } else {
+            0
+        };
+        env.storage().instance().set(&DataKey::TotalBorrow(repay_asset.clone()), &new_total_borrow);
+        
+        // Transfer collateral from borrower to liquidator
+        let new_borrower_collateral = borrower_collateral - collateral_to_seize;
+        env.storage()
+            .persistent()
+            .set(&DataKey::UserCollateral(borrower.clone(), collateral_asset.clone()), &new_borrower_collateral);
+        
+        // Transfer collateral tokens to liquidator
+        let collateral_token: Address = env.storage().instance().get(&DataKey::TokenAddress(collateral_asset.clone())).unwrap();
+        let collateral_token_client = token::Client::new(&env, &collateral_token);
+        collateral_token_client.transfer(&env.current_contract_address(), &liquidator, &collateral_to_seize);
+
+        // ====================================================================
+        // STEP 5: Emit event and return
+        // ====================================================================
+        
+        env.events().publish(
+            (symbol_short!("liquidate"), liquidator, borrower),
+            (actual_repay, collateral_to_seize)
+        );
+
+        collateral_to_seize
     }
 }
 
