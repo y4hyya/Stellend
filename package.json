@@ -11,7 +11,11 @@
     "build:contracts": "cd contracts && cargo build --target wasm32-unknown-unknown --release",
     "test:contracts": "cd contracts && cargo test",
     "build:sdk": "cd sdk && npm run build",
-    "test:sdk": "cd sdk && npm test"
+    "test:sdk": "cd sdk && npm test",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build:frontend": "cd frontend && npm run build",
+    "start:frontend": "cd frontend && npm start",
+    "lint:frontend": "cd frontend && npm run lint"
   },
   "keywords": [
     "stellar",

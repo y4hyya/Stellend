@@ -24,9 +24,11 @@ Stellend is a lending protocol that leverages Stellar's fast, low-cost transacti
 - Helper functions for common operations
 - Type definitions
 
-### Frontend (Optional)
-- Web interface for interacting with the protocol
+### Frontend
+- Next.js web application for interacting with the protocol
 - Dashboard for monitoring positions and market data
+- Integrated with Freighter wallet for transaction signing
+- Real-time TVL and health factor displays
 
 ## Tech Stack
 
@@ -54,17 +56,12 @@ cd Stellend
 
 2. Install dependencies:
 ```bash
+# Install all workspace dependencies (SDK + Frontend)
+npm install
+
 # Install Rust dependencies (for smart contracts)
 cd contracts
 cargo build
-
-# Install SDK dependencies
-cd ../sdk
-npm install
-
-# Install frontend dependencies (if using frontend)
-cd ../frontend
-npm install
 ```
 
 ### Development
@@ -91,6 +88,26 @@ npm run build
 npm test
 ```
 
+#### Frontend
+
+```bash
+cd frontend
+npm run dev      # Start development server
+npm run build    # Build for production
+npm start        # Start production server
+```
+
+#### Scripts
+
+```bash
+# Update oracle prices (normal mode)
+cd scripts
+npm run update-price
+
+# Update oracle prices (crash mode for demo)
+npm run update-price -- --crash
+```
+
 ## Project Structure
 
 ```
@@ -99,10 +116,19 @@ Stellend/
 │   ├── lending_pool/  # Main lending pool contract
 │   ├── collateral/    # Collateral management
 │   └── oracle/        # Price oracle
-├── sdk/               # TypeScript SDK
-├── frontend/          # Web interface (optional)
-├── tests/             # Integration tests
-└── docs/              # Documentation
+├── sdk/               # TypeScript SDK for protocol interaction
+├── frontend/          # Next.js web application
+│   ├── app/           # Next.js app router pages
+│   ├── components/    # React components (UI, pages, etc.)
+│   ├── hooks/         # Custom React hooks
+│   ├── context/       # React context providers
+│   ├── services/      # API and contract services
+│   ├── types/         # TypeScript type definitions
+│   └── utils/         # Utility functions
+├── scripts/           # Utility scripts
+│   └── update_price.ts # Oracle price keeper script
+├── docs/              # Documentation
+└── tests/             # Integration tests
 ```
 
 ## Features

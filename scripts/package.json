@@ -1,0 +1,21 @@
+{
+  "name": "@stellend/scripts",
+  "version": "0.1.0",
+  "description": "Utility scripts for Stellend protocol",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "update-price": "tsx update_price.ts",
+    "update-price:crash": "tsx update_price.ts --crash"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "^11.2.2",
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "tsx": "^4.7.0",
+    "typescript": "^5"
+  }
+}
+
