@@ -388,7 +388,8 @@ Health Factor = (Collateral Value × Liquidation Threshold) / Borrowed Value
 ## Interest Rate Model
 
 
-<img width="1980" height="1180" alt="image" src="https://github.com/user-attachments/assets/2a94b6ed-8b92-4039-85f4-80f194b286b6" />
+
+<img width="1042" height="576" alt="image" src="https://github.com/user-attachments/assets/01cba5b3-a5ef-412a-b75b-a33a0244fd65" />
 
 
 The protocol uses a kinked interest rate model:
@@ -400,7 +401,7 @@ If utilization ≤ 80%:
 If utilization > 80%:
   Rate = 4% + ((utilization - 80%) / 20%) × 75%
 ```
-
+<img width="1980" height="1180" alt="image" src="https://github.com/user-attachments/assets/2a94b6ed-8b92-4039-85f4-80f194b286b6" />
 This incentivizes depositors when utilization is high.
 
 ## Network Configuration
