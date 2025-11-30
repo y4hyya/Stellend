@@ -23,23 +23,23 @@ export default function CollateralPage() {
   const [withdrawAmount, setWithdrawAmount] = useState("")
 
   const loadData = useCallback(async () => {
-    try {
+      try {
       const [dashboard, balances, price] = await Promise.all([
         apogeeContractAPI.getDashboardData(publicKey || ""),
         apogeeContractAPI.getWalletBalances(publicKey || ""),
         sorobanService.getPrice("XLM"),
-      ])
-      setDashboardData(dashboard)
-      setWalletBalances(balances)
+        ])
+        setDashboardData(dashboard)
+        setWalletBalances(balances)
       setXlmPrice(price)
-    } catch (error) {
-      console.error("Failed to load data:", error)
+      } catch (error) {
+        console.error("Failed to load data:", error)
       toast.error("Failed to load data", {
         description: "Could not fetch on-chain data. Please refresh."
       })
-    } finally {
-      setLoading(false)
-    }
+      } finally {
+        setLoading(false)
+      }
   }, [publicKey])
 
   // Transaction hooks
@@ -379,7 +379,7 @@ export default function CollateralPage() {
                 ) : (
                   "Withdraw"
                 )}
-              </Button>
+            </Button>
             </div>
 
             <div className="p-4 rounded-lg bg-orange-500/10 border border-orange-500/20">

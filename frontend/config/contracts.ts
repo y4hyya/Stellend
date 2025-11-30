@@ -1,4 +1,4 @@
-// Contract Configuration for Stellend
+// Contract Configuration for Apogee
 // These addresses should be updated after deployment
 
 export const CONTRACTS = {

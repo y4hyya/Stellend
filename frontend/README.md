@@ -1,10 +1,10 @@
-# Stellend Frontend
+# Apogee Frontend
 
-Next.js web application for the Stellend lending protocol on Stellar Futurenet.
+Next.js web application for the Apogee lending protocol on Stellar Futurenet.
 
 ## Overview
 
-The Stellend frontend provides a modern, user-friendly interface for interacting with the Peer-to-Pool lending protocol. Built with Next.js 16, React 19, and Tailwind CSS, integrated with Soroban smart contracts via Freighter wallet.
+The Apogee frontend provides a modern, user-friendly interface for interacting with the Peer-to-Pool lending protocol. Built with Next.js 16, React 19, and Tailwind CSS, integrated with Soroban smart contracts via Freighter wallet.
 
 ## Features
 
@@ -121,7 +121,7 @@ The frontend integrates with **Freighter Wallet** for Stellar/Soroban interactio
 2. Create or import a Stellar account
 3. Switch to **Futurenet** network in Freighter settings
 4. Fund your account from the [Futurenet Friendbot](https://friendbot-futurenet.stellar.org/)
-5. Connect wallet on Stellend
+5. Connect wallet on Apogee
 
 ### For Developers
 

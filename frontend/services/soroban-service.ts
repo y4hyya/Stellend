@@ -1,4 +1,4 @@
-// Soroban Contract Service for Stellend
+// Soroban Contract Service for Apogee
 // Replaces mock-contract-api.ts with real on-chain calls
 
 import {
@@ -281,7 +281,7 @@ class SorobanContractService {
 
       const signedXdr = await signTx(txXdr)
       const txHash = await this.submitTransaction(signedXdr)
-      return txHash.length > 0
+      return !!txHash // Return true if we got a transaction hash
     } catch (error) {
       console.error("Error setting price:", error)
       return false

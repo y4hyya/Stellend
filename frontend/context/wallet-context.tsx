@@ -115,7 +115,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 
       // Warn if not on Testnet
       if (networkName && networkName !== "TESTNET") {
-        console.warn(`Warning: Connected to ${networkName}. Please switch to TESTNET for Stellend.`)
+        console.warn(`Warning: Connected to ${networkName}. Please switch to TESTNET for Apogee.`)
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to connect wallet"

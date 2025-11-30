@@ -1,4 +1,4 @@
-// Mock Contract API for StelLend DeFi Protocol
+// Mock Contract API for Apogee DeFi Protocol
 
 interface MockDB {
   userCollateral_sXLM: number

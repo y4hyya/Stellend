@@ -1,5 +1,5 @@
 /**
- * Contract Error Parser for Stellend
+ * Contract Error Parser for Apogee
  * 
  * Parses Soroban contract errors and returns user-friendly messages
  */

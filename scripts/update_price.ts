@@ -1,6 +1,6 @@
 /**
  * Stellend Price Oracle Keeper Script
- *
+ * 
  * This script fetches real-time prices from CoinGecko and updates the
  * on-chain Price Oracle contract on Stellar Futurenet.
  *
@@ -9,7 +9,7 @@
  * - Supports NORMAL mode (real prices) and CRASH mode (50% drop)
  * - Proper Soroban transaction building and submission
  * - Fallback to mock prices for testing without API
- *
+ * 
  * ## Usage
  *
  * ```bash
@@ -186,7 +186,7 @@ async function updatePriceOnChain(
 
   // Initialize RPC client
   const server = new SorobanRpc.Server(network.rpcUrl);
-
+  
   // Load source account
   const sourceKeypair = StellarSdk.Keypair.fromSecret(secretKey);
   const publicKey = sourceKeypair.publicKey();
@@ -199,7 +199,7 @@ async function updatePriceOnChain(
     console.error("❌ Failed to load account. Is it funded?");
     throw error;
   }
-
+  
   // Create contract instance
   const contract = new StellarSdk.Contract(oracleContractId);
 
@@ -215,7 +215,7 @@ async function updatePriceOnChain(
     StellarSdk.nativeToScVal("XLM", { type: "symbol" }),
     StellarSdk.nativeToScVal(xlmPriceScaled, { type: "i128" })
   );
-
+  
   // Build transaction
   let transaction = new StellarSdk.TransactionBuilder(sourceAccount, {
     fee: "100000", // 0.01 XLM
@@ -224,7 +224,7 @@ async function updatePriceOnChain(
     .addOperation(operation)
     .setTimeout(30)
     .build();
-
+  
   // Simulate transaction
   console.log("🔍 Simulating transaction...");
   const simulation = await server.simulateTransaction(transaction);
@@ -241,7 +241,7 @@ async function updatePriceOnChain(
     simulation
   ).build();
   preparedTx.sign(sourceKeypair);
-
+  
   // Submit transaction
   console.log("📤 Submitting transaction...");
   const sendResponse = await server.sendTransaction(preparedTx);
@@ -259,7 +259,7 @@ async function updatePriceOnChain(
     await new Promise((resolve) => setTimeout(resolve, 1000));
     result = await server.getTransaction(sendResponse.hash);
   }
-
+  
   if (result.status === "SUCCESS") {
     console.log("\n✅ Price updated successfully!");
     console.log(`   Transaction: ${sendResponse.hash}`);
@@ -293,7 +293,7 @@ function loadConfig(args: { crashMode: boolean; mockMode: boolean }): Config {
   const oracleContractId = process.env.ORACLE_CONTRACT_ID;
   const secretKey = process.env.SECRET_KEY;
   const networkName = process.env.NETWORK || DEFAULT_NETWORK;
-
+  
   if (!oracleContractId) {
     console.error("❌ ORACLE_CONTRACT_ID environment variable not set");
     console.error("\nUsage:");
@@ -307,14 +307,14 @@ function loadConfig(args: { crashMode: boolean; mockMode: boolean }): Config {
     console.error("❌ SECRET_KEY environment variable not set");
     process.exit(1);
   }
-
+  
   const network = NETWORKS[networkName];
   if (!network) {
     console.error(`❌ Unknown network: ${networkName}`);
     console.error(`   Available: ${Object.keys(NETWORKS).join(", ")}`);
     process.exit(1);
   }
-
+  
   return {
     oracleContractId,
     secretKey,
