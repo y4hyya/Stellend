@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import { Card, CardContent } from "@/components/ui/card"
 import { TrendingUp, Shield, Zap, DollarSign, Lock, Users, Loader2 } from "lucide-react"
 import { useWallet } from "@/hooks/use-wallet"
@@ -16,9 +17,17 @@ interface PlatformMetrics {
 }
 
 export function LandingPage() {
-  const { connectWallet } = useWallet()
+  const router = useRouter()
+  const { connectWallet, isConnected } = useWallet()
   const [metrics, setMetrics] = useState<PlatformMetrics | null>(null)
   const [loading, setLoading] = useState(true)
+
+  // Auto-navigate to dashboard when wallet connects
+  useEffect(() => {
+    if (isConnected) {
+      router.push("/dashboard")
+    }
+  }, [isConnected, router])
 
   useEffect(() => {
     async function loadMetrics() {
@@ -262,15 +271,34 @@ export function LandingPage() {
                   <Users className="w-8 h-8 text-accent" />
                   <h3 className="text-2xl font-bold">Protocol Stats</h3>
                 </div>
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30">
-                    <span className="text-sm text-muted-foreground">Pool Utilization</span>
-                    <span className="text-lg font-bold">{(metrics?.utilization || 0).toFixed(1)}%</span>
+                {loading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="w-6 h-6 animate-spin text-accent" />
                   </div>
-                  <p className="text-sm text-muted-foreground">
-                    Join the decentralized lending revolution on Stellar
-                  </p>
-                </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30">
+                      <span className="text-sm text-muted-foreground">Total Value Locked</span>
+                      <span className="text-lg font-bold text-primary">{formatValue(metrics?.tvl || 0)}</span>
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30">
+                      <span className="text-sm text-muted-foreground">Total Supplied</span>
+                      <span className="text-lg font-bold text-success">{formatValue(metrics?.totalSupplied || 0)}</span>
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30">
+                      <span className="text-sm text-muted-foreground">Total Borrowed</span>
+                      <span className="text-lg font-bold text-accent">{formatValue(metrics?.totalBorrowed || 0)}</span>
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30">
+                      <span className="text-sm text-muted-foreground">Pool Utilization</span>
+                      <span className="text-lg font-bold">{(metrics?.utilization || 0).toFixed(1)}%</span>
+                    </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-muted/30">
+                      <span className="text-sm text-muted-foreground">Best Supply APR</span>
+                      <span className="text-lg font-bold text-green-500">{(metrics?.bestSupplyAPR || 0).toFixed(2)}%</span>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>

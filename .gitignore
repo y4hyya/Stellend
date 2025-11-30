@@ -47,3 +47,9 @@ tmp/
 temp/
 *.tmp
 
+# Documentation (auto-generated summaries)
+*.md
+!README.md
+!CONTRIBUTING.md
+!LICENSE.md
+
